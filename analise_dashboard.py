@@ -21,11 +21,11 @@ CAMERA_ANGLES = {
     'cam_06': 112.5,
     'cam_07': 135.0,
     'cam_08': 157.5,
-    'cam_09': 180.0,    # 6h
+    'cam_09': 180.0,     # 6h
     'cam_10': 202.5,
     'cam_11': 225.0,
     'cam_12': 247.5,
-    'cam_13': 270.0,    # 9h
+    'cam_13': 270.0,     # 9h
     'cam_14': 292.5,
     'cam_15': 315.0,
     'cam_16': 337.5
@@ -59,7 +59,16 @@ def validar_angulo_minimo(cameras_selecionadas):
     
     return len(violacoes) == 0, violacoes
 
-# --- MAPEAMENTO DE KEYPOINTS PARA PORTUGUÊS (Halpe 26 Format) ---
+# --- MAPEAMENTO DE KEYPOINTS (Halpe 26 Format) ---
+KEYPOINT_NAMES_ORDER = [
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle",
+    "head", "neck", "hip", "left_big_toe", "right_big_toe",
+    "left_small_toe", "right_small_toe", "left_heel", "right_heel"
+]
+
 KEYPOINT_MAPPING = {
     'nose': 'Nariz',
     'left_eye': 'Olho Esquerdo',
@@ -237,7 +246,7 @@ try:
     df = carregar_dados('dados_processados_por_camera.xlsx')
 except FileNotFoundError:
     st.error(f"Arquivo não encontrado: 'dados_processados_por_camera.xlsx'")
-    st.warning("Execute primeiro: `python json_processor.py` para gerar o arquivo.")
+    st.warning("Execute primeiro o script de processamento do JSON para gerar o arquivo.")
     df = None
 except Exception as e:
     st.error(f"Erro ao carregar dados: {e}")
@@ -306,13 +315,13 @@ if df is not None:
         cameras_selecionadas_preset = ['cam_03', 'cam_07', 'cam_11', 'cam_15']
     elif selecao_rapida == "8 Principais (45° entre si)":
         cameras_selecionadas_preset = ['cam_01', 'cam_03', 'cam_05', 'cam_07', 
-                                    'cam_09', 'cam_11', 'cam_13', 'cam_15']
+                                     'cam_09', 'cam_11', 'cam_13', 'cam_15']
     elif selecao_rapida == "Metade Norte (C16,C1-C8)":
         cameras_selecionadas_preset = ['cam_16', 'cam_01', 'cam_02', 'cam_03', 
-                                    'cam_04', 'cam_05', 'cam_06', 'cam_07', 'cam_08']
+                                     'cam_04', 'cam_05', 'cam_06', 'cam_07', 'cam_08']
     elif selecao_rapida == "Metade Sul (C9-C16)":
         cameras_selecionadas_preset = ['cam_09', 'cam_10', 'cam_11', 'cam_12',
-                                    'cam_13', 'cam_14', 'cam_15', 'cam_16']
+                                     'cam_13', 'cam_14', 'cam_15', 'cam_16']
     
     st.sidebar.markdown("**Seleção Individual:**")
     
@@ -425,7 +434,7 @@ if df is not None:
         
         # Define cores baseadas na cobertura
         cores = ['#ef4444' if x < 70 else '#f59e0b' if x < 90 else '#10b981' 
-                for x in df_cobertura_kp['cobertura']]
+                 for x in df_cobertura_kp['cobertura']]
         
         fig_pontos_cegos = go.Figure()
         fig_pontos_cegos.add_trace(go.Bar(
@@ -451,7 +460,77 @@ if df is not None:
         
         st.plotly_chart(fig_pontos_cegos, use_container_width=True)
 
+    
+    if angulo_valido and cameras_selecionadas:
+        st.header("Matriz de Confiança: Câmera vs. Keypoint")
+        st.markdown(f"""
+        Este mapa de calor mostra a **confiança média** de cada keypoint para cada câmera selecionada. 
+        Use isso para identificar quais câmeras são "especialistas" em quais partes do corpo, 
+        o que é crucial para a triangulação 3D.
         
+        * **Verde (Alto):** A câmera tem alta confiança média para este keypoint.
+        * **Vermelho (Baixo):** A câmera tem baixa confiança média (ou não detectou) para este keypoint.
+        """)
+        
+        # 1. Filtra pelas câmeras selecionadas (ignora o limiar de confiança aqui)
+        df_heatmap = df[df['camera_id'].isin(cameras_selecionadas)]
+        
+        if df_heatmap.empty:
+            st.warning("Nenhum dado para as câmeras selecionadas.")
+        else:
+            # 2. Cria a tabela pivot (Câmera vs. Keypoint com Confiança Média)
+            pivot_data = pd.pivot_table(
+                df_heatmap,
+                values='confidence',
+                index='keypoint_name_pt',
+                columns='camera_id',
+                aggfunc='mean'
+            )
+            
+            # 3. Ordena as colunas (câmeras) por ângulo
+            sorted_cams = sorted(pivot_data.columns, key=lambda x: CAMERA_ANGLES[x])
+            
+            # 4. Ordena as linhas (keypoints) pela ordem definida no mapping
+            kp_order_pt = [KEYPOINT_MAPPING.get(k, k) for k in KEYPOINT_NAMES_ORDER]
+            
+            # Reindexa para garantir a ordem correta
+            pivot_data = pivot_data.reindex(index=kp_order_pt, columns=sorted_cams)
+            
+            # Preenche NaNs (onde uma câmera nunca viu um keypoint) com 0
+            pivot_data_filled = pivot_data.fillna(0)
+            
+            # 5. Cria o gráfico Heatmap
+            fig_heatmap = go.Figure(data=go.Heatmap(
+                z=pivot_data_filled.values,
+                x=pivot_data_filled.columns,
+                y=pivot_data_filled.index,
+                colorscale='RdYlGn',  # Vermelho (Ruim) -> Amarelo -> Verde (Bom)
+                zmin=0,
+                zmax=1.0,
+                text=np.round(pivot_data_filled.values, 2),
+                texttemplate="%{text}",
+                textfont={"size": 8},
+                hovertemplate="<b>%{y}</b><br>Câmera: %{x}<br>Conf. Média: %{z:.2f}<extra></extra>"
+            ))
+            
+            fig_heatmap.update_layout(
+                title="Confiança Média por Câmera e Keypoint",
+                xaxis_title="Câmeras (ordenadas por ângulo)",
+                yaxis_title="Keypoints",
+                height=700,
+                xaxis=dict(ticks="", side="top"), # Põe o nome das câmeras no topo
+                yaxis=dict(ticks="", autorange="reversed"), # Inverte para "head" ficar no topo
+                margin=dict(l=0, r=0, t=100, b=0)
+            )
+            
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    # --------------------------------------------------------------------------
+    # --- [FIM DA NOVA SEÇÃO] ---
+    # --------------------------------------------------------------------------
+
+    # --- ANÁLISE DE DETECÇÃO AO LONGO DO TEMPO ---
+    if angulo_valido and cameras_selecionadas:
         st.header("Análise de Detecção por Câmera ao Longo do Tempo")
         st.markdown(f"Analisando detecções com confiança **≥ {limiar_confianca}%** para as **{len(cameras_selecionadas)}** câmeras selecionadas.")
         
@@ -466,8 +545,8 @@ if df is not None:
         else:
             # Agrupa por frame e camera para contar os keypoints
             df_kps_por_frame_cam = df_detalhado_cam.groupby(['frame_id', 'camera_id'])['keypoint_name_pt'] \
-                                                .nunique() \
-                                                .reset_index(name='keypoint_count')
+                                                 .nunique() \
+                                                 .reset_index(name='keypoint_count')
             
             # 2. Gráfico 1: Linha do Tempo da Detecção de Keypoints
             fig_kps_timeline = px.line(
@@ -497,9 +576,9 @@ if df is not None:
             
             # 3. Gráfico 2: Média de Detecções por Câmera
             df_kps_media_cam = df_kps_por_frame_cam.groupby('camera_id')['keypoint_count'] \
-                                                    .mean() \
-                                                    .reset_index() \
-                                                    .sort_values('keypoint_count', ascending=False)
+                                                   .mean() \
+                                                   .reset_index() \
+                                                   .sort_values('keypoint_count', ascending=False)
             
             fig_kps_media_bar = px.bar(
                 df_kps_media_cam,
