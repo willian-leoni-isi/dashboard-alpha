@@ -13,37 +13,58 @@ INPUT_JSON_PATH = 'alphapose-results.json'
 OUTPUT_EXCEL_PATH = 'dados_processados_por_camera.xlsx'
 FRAME_PADDING = 3  # Para formatar 000, 001, ..., 449
 
+# O índice da lista (0-15) é o bloco de frames (0-449, 450-899, etc.)
+#  1, 10, 11, 12, 13, 14, 15, 16, 2, 3, 4, 5, 6, 7, 8, 9
+CAMERA_ORDER_MAPPING = [
+    1,  # Bloco 0 (frames 0-449)
+    10, # Bloco 1 (frames 450-899)
+    11, # Bloco 2
+    12, # Bloco 3
+    13, # Bloco 4
+    14, # Bloco 5
+    15, # Bloco 6
+    16, # Bloco 7
+    2,  # Bloco 8
+    3,  # Bloco 9
+    4,  # Bloco 10
+    5,  # Bloco 11
+    6,  # Bloco 12
+    7,  # Bloco 13
+    8,  # Bloco 14
+    9   # Bloco 15 (frames 6750-7199)
+]
+
 # --------------------------------------------------------------------------
 # --- MAPEAMENTO CORRETO DOS 26 KEYPOINTS (Halpe Format) ---
 # --------------------------------------------------------------------------
 # Fonte: https://github.com/Fang-Haoshu/Halpe-FullBody
 KEYPOINT_NAMES = [
-    "nose",                    # 0
-    "left_eye",               # 1
-    "right_eye",              # 2
-    "left_ear",               # 3
-    "right_ear",              # 4
-    "left_shoulder",          # 5
-    "right_shoulder",         # 6
-    "left_elbow",             # 7
-    "right_elbow",            # 8
-    "left_wrist",             # 9
-    "right_wrist",            # 10
-    "left_hip",               # 11
-    "right_hip",              # 12
-    "left_knee",              # 13
-    "right_knee",             # 14
-    "left_ankle",             # 15
-    "right_ankle",            # 16
-    "head",                   # 17
-    "neck",                   # 18
-    "hip",                    # 19 (centro dos quadris)
-    "left_big_toe",           # 20
-    "right_big_toe",          # 21
-    "left_small_toe",         # 22
-    "right_small_toe",        # 23
-    "left_heel",              # 24
-    "right_heel"              # 25
+    "nose",                 # 0
+    "left_eye",             # 1
+    "right_eye",            # 2
+    "left_ear",             # 3
+    "right_ear",            # 4
+    "left_shoulder",        # 5
+    "right_shoulder",       # 6
+    "left_elbow",           # 7
+    "right_elbow",          # 8
+    "left_wrist",           # 9
+    "right_wrist",          # 10
+    "left_hip",             # 11
+    "right_hip",            # 12
+    "left_knee",            # 13
+    "right_knee",           # 14
+    "left_ankle",           # 15
+    "right_ankle",          # 16
+    "head",                 # 17
+    "neck",                 # 18
+    "hip",                  # 19 (centro dos quadris)
+    "left_big_toe",         # 20
+    "right_big_toe",        # 21
+    "left_small_toe",       # 22
+    "right_small_toe",      # 23
+    "left_heel",            # 24
+    "right_heel"            # 25
 ]
 
 # --------------------------------------------------------------------------
@@ -57,9 +78,9 @@ def processar_dados_alphapose():
     
     IMPORTANTE: O vídeo tem 7200 frames totais (260s × 30fps, dividido em 16 perspectivas)
     - Frames 0-449: cam_01 (mesma cena, perspectiva 1) - 15 segundos
-    - Frames 450-899: cam_02 (mesma cena, perspectiva 2) - 15 segundos
-    - Frames 900-1349: cam_03 (mesma cena, perspectiva 3) - 15 segundos
-    - ... e assim por diante até cam_16
+    - Frames 450-899: cam_10 (mesma cena, perspectiva 2) - 15 segundos
+    - Frames 900-1349: cam_11 (mesma cena, perspectiva 3) - 15 segundos
+    - ... e assim por diante
     
     O frame_id normalizado (0-449) representa o MESMO MOMENTO no tempo.
     Exemplo: frame 0, 450, 900, 1350... = mesmo instante, 16 ângulos diferentes
@@ -77,6 +98,7 @@ def processar_dados_alphapose():
     print(f"  • Frames por câmera: {FRAMES_PER_CAMERA} ({VIDEO_SECONDS}s × {FPS} FPS)")
     print(f"  • Total de frames esperado: {FRAMES_PER_CAMERA * NUM_CAMERAS}")
     print(f"  • Total de keypoints por detecção: {len(KEYPOINT_NAMES)}")
+    print(f"  • Ordem das câmeras (por bloco): {CAMERA_ORDER_MAPPING}") ### ADICIONADO ###
     print("-" * 80)
 
     try:
@@ -105,18 +127,31 @@ def processar_dados_alphapose():
             base_name, extension = os.path.splitext(original_frame_id)
             frame_number = int(base_name)
 
-            # --- CÁLCULO DO ÍNDICE DA CÂMERA (OFFSET) ---
+            # --- CÁLCULO DO ÍNDICE DA CÂMERA (OFFSET) --- ### MODIFICADO ###
             # Cada bloco de 450 frames = 1 câmera
+            # camera_index é o ÍNDICE DO BLOCO (0-15)
             camera_index = frame_number // FRAMES_PER_CAMERA
             
             # --- FILTRA FRAMES INVÁLIDOS ---
+            # Verifica se o índice do bloco está dentro dos limites (0-15)
             if camera_index >= NUM_CAMERAS:
                 if frames_ignorados < 5:  # Mostra apenas os primeiros avisos
-                    print(f"   ⚠️ Aviso: Ignorando frame '{original_frame_id}' (câmera {camera_index + 1} > {NUM_CAMERAS})")
+                    print(f"   ⚠️ Aviso: Ignorando frame '{original_frame_id}' (Índice de bloco {camera_index} > {NUM_CAMERAS-1})")
                 frames_ignorados += 1
                 continue
                 
-            camera_id = f"cam_{camera_index + 1:02d}"
+            # --- MAPEAMENTO PARA O ID CORRETO DA CÂMERA --- ### MODIFICADO ###
+            # Busca o número real da câmera usando o mapa
+            try:
+                actual_camera_number = CAMERA_ORDER_MAPPING[camera_index]
+            except IndexError:
+                # Segurança extra, caso o mapeamento não tenha 16 itens
+                if frames_ignorados < 5:
+                    print(f"   ⚠️ Aviso: Ignorando frame '{original_frame_id}' (Índice de bloco {camera_index} fora do mapeamento)")
+                frames_ignorados += 1
+                continue
+                
+            camera_id = f"cam_{actual_camera_number:02d}"
 
             # --- CALCULA O FRAME DE REFERÊNCIA (MOMENTO NO TEMPO) ---
             # O momento no tempo (0-449) é o MESMO para todas as câmeras
@@ -180,7 +215,9 @@ def processar_dados_alphapose():
             "camera_id", "frame_id", "keypoint_name", 
             "confidence", "x", "y", "detection_score", "original_frame_id"
         ]
-        df = df[colunas_ordenadas]
+        # Filtra para caso alguma coluna não exista (embora não deva acontecer)
+        colunas_presentes = [col for col in colunas_ordenadas if col in df.columns]
+        df = df[colunas_presentes]
         
         # Ordena por câmera e frame para facilitar análise
         df = df.sort_values(['camera_id', 'frame_id', 'keypoint_name']).reset_index(drop=True)
@@ -244,6 +281,21 @@ if __name__ == "__main__":
         else:
             print(f"⚠️ Atenção: {NUM_CAMERAS - len(frame_zero)} câmeras sem detecção no frame 000")
         
+        # Teste extra para verificar a nova ordem
+        print("\n" + "-" * 80)
+        print("VERIFICAÇÃO DA NOVA ORDEM:")
+        print(f"Frame original '450' (Bloco 1) deve ser mapeado para 'cam_10'")
+        print("-" * 80)
+        frame_450_check = final_dataframe[final_dataframe['original_frame_id'] == '450.jpg']['camera_id'].unique()
+        if len(frame_450_check) > 0:
+            print(f"   Frame 450.jpg foi mapeado para: {frame_450_check[0]}")
+            if frame_450_check[0] == 'cam_10':
+                print("   ✅ Mapeamento do Bloco 1 correto!")
+            else:
+                print(f"   ❌ ERRO: Mapeamento do Bloco 1 incorreto! Esperado 'cam_10'.")
+        else:
+            print(f"   (Frame 450.jpg não encontrado nas detecções)")
+
         print("\n" + "=" * 80)
         print("PROCESSAMENTO CONCLUÍDO!")
         print("=" * 80)
