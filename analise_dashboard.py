@@ -8,9 +8,8 @@ import math
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Simulador de Composição de Câmeras")
-st.title("🎥 Simulador de Composição de Câmeras - AlphaPose")
+st.title("Simulador de Composição de Câmeras - AlphaPose")
 st.markdown("**Encontre a combinação mínima de câmeras para cobertura máxima de keypoints**")
-st.caption("📹 16 câmeras × 450 frames × 26 keypoints | 15 segundos de ação em múltiplas perspectivas")
 
 # --- MAPEAMENTO DE ÂNGULOS DAS CÂMERAS ---
 CAMERA_ANGLES = {
@@ -93,21 +92,11 @@ KEYPOINT_MAPPING = {
 # --- CARREGAMENTO DOS DADOS ---
 @st.cache_data
 def carregar_dados(caminho_excel):
-    """Carrega os dados do arquivo Excel com offset corrigido."""
-    try:
-        df = pd.read_excel(caminho_excel)
-        df['keypoint_name_pt'] = df['keypoint_name'].map(KEYPOINT_MAPPING)
-        df['keypoint_name_pt'].fillna(df['keypoint_name'], inplace=True)
-        st.toast("✅ Dados carregados com sucesso!", icon="📊")
-        return df
-    except FileNotFoundError:
-        st.error(f"❌ Arquivo não encontrado: '{caminho_excel}'")
-        # MELHORIA DE LOG: st.warning é mais apropriado que st.info
-        st.warning("Execute primeiro: `python json_processor.py` para gerar o arquivo.")
-        return None
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar dados: {e}")
-        return None
+    """Carrega os dados do arquivo Excel."""
+    df = pd.read_excel(caminho_excel)
+    df['keypoint_name_pt'] = df['keypoint_name'].map(KEYPOINT_MAPPING)
+    df['keypoint_name_pt'].fillna(df['keypoint_name'], inplace=True)
+    return df
 
 # --- FUNÇÃO DE CÁLCULO DE COBERTURA ---
 def calcular_cobertura(df, cameras_selecionadas, limiar_confianca):
@@ -151,28 +140,17 @@ def calcular_cobertura(df, cameras_selecionadas, limiar_confianca):
 def encontrar_melhores_combinacoes(df, limiar_confianca, max_cameras=6, respeitar_angulo=True):
     """Encontra as melhores combinações de 1 a max_cameras câmeras."""
     cameras_disponiveis = sorted(df['camera_id'].unique())
-    resultados = []
-    
-    progress_bar = st.progress(0, text="Iniciando análise de combinações...")
-    status_text = st.empty()
-    
-    total_combinacoes_possiveis = sum(len(list(combinations(cameras_disponiveis, n))) for n in range(1, min(max_cameras + 1, len(cameras_disponiveis) + 1)))
-    
-    # MELHORIA DE LOG: Informa o usuário antes do loop começar
-    status_text.info(f"Preparando {total_combinacoes_possiveis:,} combinações... (pode levar um momento)")
     
     resultados_validos = []
-    contador_total = 0
     
     for n in range(1, min(max_cameras + 1, len(cameras_disponiveis) + 1)):
         combos = list(combinations(cameras_disponiveis, n))
         for combo in combos:
-            contador_total += 1
             # Valida ângulo mínimo se necessário
             if respeitar_angulo:
                 valido, _ = validar_angulo_minimo(list(combo))
                 if not valido:
-                    continue # Pula esta combinação, não a adiciona aos resultados
+                    continue
             
             cobertura, _ = calcular_cobertura(df, list(combo), limiar_confianca)
             resultados_validos.append({
@@ -180,17 +158,8 @@ def encontrar_melhores_combinacoes(df, limiar_confianca, max_cameras=6, respeita
                 'cameras': ', '.join(combo),
                 'cobertura': cobertura
             })
-            
-            if contador_total % 100 == 0:
-                progresso = min(contador_total / total_combinacoes_possiveis, 1.0)
-                progress_bar.progress(progresso, text=f"Analisando combinação {contador_total:,}/{total_combinacoes_possiveis:,}...")
-                status_text.empty() # Limpa a mensagem "Preparando..."
 
-    progress_bar.empty()
-    status_text.empty()
-    
     if not resultados_validos:
-        st.warning("Nenhuma combinação válida encontrada com os filtros aplicados.")
         return pd.DataFrame(columns=['num_cameras', 'cameras', 'cobertura'])
 
     return pd.DataFrame(resultados_validos).sort_values('cobertura', ascending=False)
@@ -213,19 +182,6 @@ def criar_diagrama_circular(cameras_selecionadas, violacoes=[]):
         showlegend=False,
         hoverinfo='skip'
     ))
-    
-    # Linhas cardeais
-    for angulo, cor, nome in [(0, 'lightblue', 'Norte'), (90, 'lightgreen', 'Leste'), 
-                               (180, 'lightcoral', 'Sul'), (270, 'lightyellow', 'Oeste')]:
-        rad = math.radians(angulo - 90)
-        fig.add_trace(go.Scatter(
-            x=[0, 1.15*math.cos(rad)],
-            y=[0, 1.15*math.sin(rad)],
-            mode='lines',
-            line=dict(color=cor, width=1, dash='dash'),
-            showlegend=False,
-            hoverinfo='skip'
-        ))
     
     # Adiciona violações (linhas vermelhas)
     for v in violacoes:
@@ -258,7 +214,7 @@ def criar_diagrama_circular(cameras_selecionadas, violacoes=[]):
             textposition='middle center',
             textfont=dict(size=8, color='white' if selecionada else 'gray'),
             name=f'{cam} ({angulo}°)',
-            hovertext=f'{cam}<br>Ângulo: {angulo}°<br>Status: {"✅ Selecionada" if selecionada else "⚪ Disponível"}'
+            hovertext=f'{cam}<br>Ângulo: {angulo}°<br>Status: {"Selecionada" if selecionada else "Disponível"}'
         ))
     
     fig.update_layout(
@@ -277,25 +233,32 @@ def criar_diagrama_circular(cameras_selecionadas, violacoes=[]):
     return fig
 
 # --- CARREGAMENTO DOS DADOS ---
-df = carregar_dados('dados_processados_por_camera.xlsx')
+try:
+    df = carregar_dados('dados_processados_por_camera.xlsx')
+except FileNotFoundError:
+    st.error(f"Arquivo não encontrado: 'dados_processados_por_camera.xlsx'")
+    st.warning("Execute primeiro: `python json_processor.py` para gerar o arquivo.")
+    df = None
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+    df = None
 
 if df is not None:
     cameras_disponiveis = sorted(df['camera_id'].unique())
     
     # Informações do dataset
     st.sidebar.markdown(f"""
-    ### 📊 Informações do Dataset
+    ### Informações do Dataset
     - **Câmeras:** {len(cameras_disponiveis)} perspectivas
-    - **Frames:** {df['frame_id'].nunique():,} (15 segundos)
+    - **Frames:** {df['frame_id'].nunique():,}
     - **Keypoints:** {df['keypoint_name_pt'].nunique()}
     - **Detecções:** {len(df):,}
-    - **Ângulo entre câmeras:** 22.5°
     """)
     
     st.sidebar.markdown("---")
     
     # --- SIDEBAR: CONTROLES ---
-    st.sidebar.header("⚙️ Controles do Simulador")
+    st.sidebar.header("Controles do Simulador")
     
     # Controle 1: Limiar de Confiança
     st.sidebar.subheader("1. Limiar de Confiança")
@@ -309,18 +272,11 @@ if df is not None:
     )
     
     # Controle 2: Seleção de Câmeras
-    st.sidebar.subheader("2. Selecione as Câmeras")
+    st.sidebar.subheader("2. Seleção de Câmeras")
     
     st.sidebar.info(f"""
-    **⚠️ Regra de Ângulo Mínimo**
-    
-    As câmeras devem ter pelo menos **{ANGULO_MINIMO}°** de separação entre si para garantir perspectivas distintas.
-    
-    **Posições Cardeais:**
-    - 🔵 Norte (12h): C1 (0°)
-    - 🟢 Leste (3h): C5 (90°)  
-    - 🔴 Sul (6h): C9 (180°)
-    - 🟡 Oeste (9h): C13 (270°)
+    **Regra de Ângulo Mínimo:**
+    As câmeras devem ter pelo menos **{ANGULO_MINIMO}°** de separação.
     """)
     
     # Opção de seleção rápida
@@ -339,8 +295,7 @@ if df is not None:
         index=0
     )
     
-    # A lista 'cameras_selecionadas' será a fonte da verdade para os checkboxes
-    # Esta lógica é executada ANTES dos checkboxes serem desenhados
+    # Define preset baseado na seleção rápida
     cameras_selecionadas_preset = []
     
     if selecao_rapida == "Todas (16)":
@@ -351,20 +306,17 @@ if df is not None:
         cameras_selecionadas_preset = ['cam_03', 'cam_07', 'cam_11', 'cam_15']
     elif selecao_rapida == "8 Principais (45° entre si)":
         cameras_selecionadas_preset = ['cam_01', 'cam_03', 'cam_05', 'cam_07', 
-                                'cam_09', 'cam_11', 'cam_13', 'cam_15']
+                                    'cam_09', 'cam_11', 'cam_13', 'cam_15']
     elif selecao_rapida == "Metade Norte (C16,C1-C8)":
         cameras_selecionadas_preset = ['cam_16', 'cam_01', 'cam_02', 'cam_03', 
-                                'cam_04', 'cam_05', 'cam_06', 'cam_07', 'cam_08']
+                                    'cam_04', 'cam_05', 'cam_06', 'cam_07', 'cam_08']
     elif selecao_rapida == "Metade Sul (C9-C16)":
-        # CORREÇÃO DE BUG: Faltava a 'cam_16'
         cameras_selecionadas_preset = ['cam_09', 'cam_10', 'cam_11', 'cam_12',
-                                'cam_13', 'cam_14', 'cam_15', 'cam_16']
-    # Se for "Manual" ou "Nenhuma", a lista fica vazia (cameras_selecionadas_preset = [])
-    
+                                    'cam_13', 'cam_14', 'cam_15', 'cam_16']
     
     st.sidebar.markdown("**Seleção Individual:**")
     
-    # A lista final será (re)construída a partir do estado dos checkboxes
+    # Constrói a lista de câmeras selecionadas baseado nos checkboxes
     cameras_selecionadas = []
     
     # Divide em 4 colunas para melhor visualização das 16 câmeras
@@ -372,30 +324,18 @@ if df is not None:
     for idx, cam in enumerate(cameras_disponiveis):
         col = cols[idx % 4]
         
-        # CORREÇÃO LÓGICA: 
-        # A seleção "Manual" (index 0) não deve mais selecionar as 8 primeiras por padrão.
-        # Agora, o 'value' do checkbox é determinado *apenas* pela lista 'cameras_selecionadas_preset'
-        # que é controlada pela 'selecao_rapida'.
         checked = cam in cameras_selecionadas_preset
-        
         label = f"{cam.replace('cam_', 'C')} ({CAMERA_ANGLES[cam]:.0f}°)"
         
-        # O estado 'value=checked' define o checkbox. 
-        # A interação do usuário é capturada pelo 'if col.checkbox(...)'
         if col.checkbox(label, value=checked, key=f"cam_{cam}"):
-            if cam not in cameras_selecionadas:
-                cameras_selecionadas.append(cam)
-        else:
-            # Esta parte não é estritamente necessária se reconstruímos a lista do zero,
-            # mas é boa prática para o 'if/else'
-            pass 
-            
+            cameras_selecionadas.append(cam)
+    
     # Validação de ângulo
     angulo_valido, violacoes = validar_angulo_minimo(cameras_selecionadas)
     
     if not angulo_valido:
         st.sidebar.error(f"""
-        ⚠️ **Violação de Ângulo Mínimo!**
+        **Violação de Ângulo Mínimo!**
         
         {len(violacoes)} par(es) de câmeras estão muito próximos (<{ANGULO_MINIMO}°):
         """)
@@ -405,13 +345,12 @@ if df is not None:
             st.sidebar.write(f"... e mais {len(violacoes)-5} violações")
     else:
         if len(cameras_selecionadas) > 0:
-            # MELHORIA DE LOG: Mensagem mais clara
-            st.sidebar.success(f"✅ Configuração válida! {len(cameras_selecionadas)} câmeras selecionadas.")
+            st.sidebar.success(f"Configuração válida. {len(cameras_selecionadas)} câmeras selecionadas.")
         else:
             st.sidebar.warning("Nenhuma câmera selecionada.")
     
     # --- DIAGRAMA CIRCULAR ---
-    st.header("🎯 Disposição Espacial das Câmeras")
+    st.header("Disposição Espacial das Câmeras")
     
     col1, col2 = st.columns([2, 1])
     
@@ -421,12 +360,10 @@ if df is not None:
     
     with col2:
         st.markdown("### Legenda")
-        st.markdown("""
-        - 🟢 **Verde**: Câmera selecionada
-        - ⚪ **Cinza**: Câmera disponível  
-        - 🔴 **Linha vermelha**: Violação de ângulo
-        
-        **Dica:** Use a "Seleção Rápida" ou clique nas câmeras na sidebar para montar sua composição.
+        st.markdown(f"""
+        - **Verde**: Câmera selecionada
+        - **Cinza**: Câmera disponível
+        - **Linha Vermelha**: Violação de ângulo (< {ANGULO_MINIMO}°)
         """)
         
         if cameras_selecionadas:
@@ -442,19 +379,18 @@ if df is not None:
         cobertura_por_kp = {kp: 0.0 for kp in df['keypoint_name_pt'].unique()}
     
     # --- PLACAR PRINCIPAL ---
-    st.header("📊 Pontuação de Cobertura da Composição")
+    st.header("Pontuação de Cobertura da Composição")
     
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
         # Placar grande
         if not angulo_valido:
-            st.error("⚠️ Configuração inválida - Corrija as violações de ângulo primeiro")
+            st.error("Configuração inválida - Corrija as violações de ângulo primeiro")
         elif not cameras_selecionadas:
             st.info("Selecione uma ou mais câmeras para calcular a cobertura.")
         else:
-            cor_placar = "🟢" if cobertura_geral >= 90 else "🟡" if cobertura_geral >= 70 else "🔴"
-            st.markdown(f"### {cor_placar} Cobertura Total: **{cobertura_geral:.1f}%**")
+            st.markdown(f"### Cobertura Total: **{cobertura_geral:.1f}%**")
             st.progress(cobertura_geral / 100)
             st.caption(f"Limiar: {limiar_confianca}% | Câmeras: {len(cameras_selecionadas)}/{len(cameras_disponiveis)}")
     
@@ -474,12 +410,12 @@ if df is not None:
         kps_ruins = sum(1 for v in cobertura_por_kp.values() if v < 70)
         delta_color = "normal" if kps_ruins == 0 else "inverse"
         st.metric("Pontos Cegos", kps_ruins, 
-                 delta=None if kps_ruins == 0 else f"{kps_ruins} KPs < 70%",
-                 delta_color=delta_color)
+                    delta=None if kps_ruins == 0 else f"{kps_ruins} KPs < 70%",
+                    delta_color=delta_color)
     
     # --- GRÁFICO DE PONTOS CEGOS ---
     if angulo_valido and cameras_selecionadas:
-        st.header("📉 Análise de Pontos Cegos da Composição")
+        st.header("Análise de Pontos Cegos da Composição")
         
         # Prepara dados para o gráfico
         df_cobertura_kp = pd.DataFrame([
@@ -489,7 +425,7 @@ if df is not None:
         
         # Define cores baseadas na cobertura
         cores = ['#ef4444' if x < 70 else '#f59e0b' if x < 90 else '#10b981' 
-                 for x in df_cobertura_kp['cobertura']]
+                for x in df_cobertura_kp['cobertura']]
         
         fig_pontos_cegos = go.Figure()
         fig_pontos_cegos.add_trace(go.Bar(
@@ -508,15 +444,90 @@ if df is not None:
             yaxis_title="",
             height=700,
             showlegend=False,
-            xaxis_range=[0, 105] # Garante espaço para o texto
+            xaxis_range=[0, 105]
         )
         fig_pontos_cegos.add_vline(x=70, line_dash="dash", line_color="orange", annotation_text="Limiar Aceitável")
         fig_pontos_cegos.add_vline(x=90, line_dash="dash", line_color="green", annotation_text="Excelente")
         
         st.plotly_chart(fig_pontos_cegos, use_container_width=True)
-    
+
+        
+        st.header("Análise de Detecção por Câmera ao Longo do Tempo")
+        st.markdown(f"Analisando detecções com confiança **≥ {limiar_confianca}%** para as **{len(cameras_selecionadas)}** câmeras selecionadas.")
+        
+        # 1. Preparar os dados
+        df_detalhado_cam = df[
+            (df['camera_id'].isin(cameras_selecionadas)) &
+            (df['confidence'] >= limiar_confianca / 100.0)
+        ]
+        
+        if df_detalhado_cam.empty:
+            st.warning("Nenhuma detecção encontrada para esta combinação de câmeras e limiar de confiança.")
+        else:
+            # Agrupa por frame e camera para contar os keypoints
+            df_kps_por_frame_cam = df_detalhado_cam.groupby(['frame_id', 'camera_id'])['keypoint_name_pt'] \
+                                                .nunique() \
+                                                .reset_index(name='keypoint_count')
+            
+            # 2. Gráfico 1: Linha do Tempo da Detecção de Keypoints
+            fig_kps_timeline = px.line(
+                df_kps_por_frame_cam,
+                x='frame_id',
+                y='keypoint_count',
+                color='camera_id',
+                title="Contagem de Keypoints Válidos por Frame (por Câmera)",
+                labels={
+                    'frame_id': 'Frame ID',
+                    'keypoint_count': 'Nº de Keypoints Detectados',
+                    'camera_id': 'Câmera'
+                },
+                hover_name='camera_id',
+                hover_data={'frame_id': True, 'keypoint_count': True, 'camera_id': False}
+            )
+            
+            fig_kps_timeline.update_layout(
+                yaxis_title="Nº de Keypoints Detectados",
+                xaxis_title="Frame",
+                legend_title="Câmeras",
+                height=500
+            )
+            fig_kps_timeline.update_yaxes(range=[0, df['keypoint_name_pt'].nunique() + 1])
+            
+            st.plotly_chart(fig_kps_timeline, use_container_width=True)
+            
+            # 3. Gráfico 2: Média de Detecções por Câmera
+            df_kps_media_cam = df_kps_por_frame_cam.groupby('camera_id')['keypoint_count'] \
+                                                    .mean() \
+                                                    .reset_index() \
+                                                    .sort_values('keypoint_count', ascending=False)
+            
+            fig_kps_media_bar = px.bar(
+                df_kps_media_cam,
+                x='camera_id',
+                y='keypoint_count',
+                color='camera_id',
+                title="Média de Keypoints Válidos por Frame (por Câmera)",
+                labels={
+                    'camera_id': 'Câmera',
+                    'keypoint_count': 'Média de Keypoints por Frame'
+                },
+                text='keypoint_count'
+            )
+            
+            fig_kps_media_bar.update_layout(
+                yaxis_title="Média de Keypoints por Frame",
+                xaxis_title="Câmera",
+                showlegend=False,
+                height=450
+            )
+            fig_kps_media_bar.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+            fig_kps_media_bar.update_yaxes(range=[0, df['keypoint_name_pt'].nunique() + 1])
+            
+            st.plotly_chart(fig_kps_media_bar, use_container_width=True)
+
+
     # --- RECOMENDAÇÕES AUTOMÁTICAS ---
-    st.header("💡 Recomendações de Combinações Ótimas")
+    st.header("Recomendações de Combinações Ótimas")
     
     respeitar_angulo_busca = st.checkbox(
         f"Considerar apenas combinações com ângulo mínimo de {ANGULO_MINIMO}°",
@@ -525,13 +536,13 @@ if df is not None:
     )
     
     if st.button("Encontrar Melhores Combinações (até 6 câmeras)"):
-        # O @st.cache_data vai garantir que isso só rode se os parâmetros mudarem
-        df_combinacoes = encontrar_melhores_combinacoes(
-            df, 
-            limiar_confianca, 
-            max_cameras=6, 
-            respeitar_angulo=respeitar_angulo_busca
-        )
+        with st.spinner("Analisando combinações..."):
+            df_combinacoes = encontrar_melhores_combinacoes(
+                df, 
+                limiar_confianca, 
+                max_cameras=6, 
+                respeitar_angulo=respeitar_angulo_busca
+            )
         
         if df_combinacoes.empty:
             st.warning("Nenhuma combinação encontrada. Tente desmarcar a restrição de ângulo.")
@@ -539,7 +550,7 @@ if df is not None:
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("🏆 Top 10 Melhores Combinações")
+                st.subheader("Top 10 Melhores Combinações")
                 top_10 = df_combinacoes.head(10).copy()
                 top_10['cobertura'] = top_10['cobertura'].round(1)
                 st.dataframe(
@@ -559,7 +570,7 @@ if df is not None:
                 )
             
             with col2:
-                st.subheader("📊 Melhor por Quantidade")
+                st.subheader("Melhor por Quantidade")
                 melhor_por_qtd = df_combinacoes.loc[df_combinacoes.groupby('num_cameras')['cobertura'].idxmax()]
                 melhor_por_qtd['cobertura'] = melhor_por_qtd['cobertura'].round(1)
                 st.dataframe(
@@ -579,10 +590,9 @@ if df is not None:
                 )
             
             # --- ANÁLISE DE CUSTO-BENEFÍCIO ---
-            st.header("💰 Análise de Custo-Benefício")
+            st.header("Análise de Custo-Benefício")
             
             melhor_por_qtd_sorted = melhor_por_qtd.sort_values('num_cameras')
-            melhor_por_qtd_sorted['ganho_marginal'] = melhor_por_qtd_sorted['cobertura'].diff().fillna(melhor_por_qtd_sorted['cobertura'])
             
             fig_custo = go.Figure()
             fig_custo.add_trace(go.Scatter(
@@ -603,7 +613,6 @@ if df is not None:
             )
             
             st.plotly_chart(fig_custo, use_container_width=True)
-            st.caption("**Interpretação:** Procure o 'joelho' da curva - ponto onde adicionar mais câmeras traz ganhos marginais pequenos.")
 
 else:
-    st.error("❌ Não foi possível carregar os dados. Verifique se o arquivo 'dados_processados_por_camera.xlsx' existe no diretório.")
+    st.error("Não foi possível carregar os dados. Verifique se o arquivo 'dados_processados_por_camera.xlsx' existe no diretório.")
